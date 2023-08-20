@@ -3,16 +3,16 @@ import { ColumnWidthOutlined, ColumnHeightOutlined, FieldStringOutlined, FieldNu
 import { useState, useRef, useEffect } from 'react'
 import './App.css'
 const { Header, Content } = Layout;
-let jsonColumns = []
-let isFilterTrim = true
+
 function App() {
   const {
     token: { colorBgContainer },
   } = theme.useToken();  
   
+  let [jsonColumns, setJsonColumns] = useState([])
+
   const [openTour, setOpenTour] = useState(false)
-  const [messageApi,] = message.useMessage();
-  const [tableString, setTableString] = useState([])
+  const [ setTableString] = useState([])
   const [columns, setColumns] = useState([])
   const [data, setData] = useState([])
 
@@ -70,17 +70,17 @@ function App() {
           // 获取剪贴板中的文本内容
           navigator.clipboard.readText()
             .then(text => {
-              console.log("剪贴板中的文本内容：", text);
-              const [columns, data] = tableString2Array(text);
+              message.success('读取成功')
+              const [columns, data] = tableString2Array(text, [jsonColumns, setJsonColumns]);
               setTableString(text);
               setColumns(columns);
               setData(data);
             })
             .catch(err => {
-              console.error("无法读取剪贴板中的文本内容：", err);
+              message.success('读取失败', err)
             });
         } else {
-          console.error("浏览器不支持访问剪贴板");
+          message.success('浏览器不支持访问剪贴板')
         }
       }
     });
@@ -93,9 +93,12 @@ function App() {
     }
     else if (current !== 0) {
       const tableString = `任务A\t8:30\t9:00\t完成\r\n任务B\t9:00\t10:00\t`
-      const [columns, data] = tableString2Array(tableString);
+      const [columns, data] = tableString2Array(tableString, [jsonColumns, setJsonColumns]);
       setColumns(columns);
       setData(data);
+    } else {
+      setColumns([]);
+      setData([]);
     }
   }
 
@@ -119,7 +122,7 @@ function App() {
           </h1>
           <Space>
             <Segmented
-              onChange={() => reverseTable([columns, setColumns], [data, setData])}
+              onChange={() => reverseTable([columns, setColumns], [data, setData], [jsonColumns, setJsonColumns])}
               options={[
                 {
                   label: '横向',
@@ -136,8 +139,8 @@ function App() {
             />
             <div ref={refSave}>
               <Dropdown.Button 
-                onClick={() => handleSave(data, messageApi)}
-                menu={{ items, onClick: () => handleSaveMenu(data, messageApi) }}
+                onClick={() => handleSave(data, jsonColumns)}
+                menu={{ items, onClick: () => handleSaveMenu(data, jsonColumns) }}
               >
                 保存JSON
               </Dropdown.Button >
@@ -146,7 +149,7 @@ function App() {
         </Header>
         <Content style={{ height: "100% - 64px"}}>
             <div ref={refTable}>
-              <Table scroll={{ x: '100%', y: 'calc(100vh - 130px)' }} columns={columns} dataSource={data} pagination={false}/>
+              <Table rowKey={'index'} scroll={{ x: '100%', y: 'calc(100vh - 130px)' }} columns={columns} dataSource={data} pagination={false}/>
             </div>
         </Content>
       </Layout>
@@ -156,10 +159,9 @@ function App() {
 }
 
 
-function tableString2Array(string) {
-  if (isFilterTrim) {
-    string = string.replace(/^\s+|\s+$/g, '')
-  }
+function tableString2Array(string, useJsonColumnsState) {
+  string = string.replace(/^\s+|\s+$/g, '')
+  let jsonColumns = []
   let array = string.split('\r\n').map((item) => (item.split('\t')))
   let columns = new Array(Math.max(...array.map(item => item.length))).fill(0).map((_, index) => {
     jsonColumns[index] = {
@@ -180,7 +182,7 @@ function tableString2Array(string) {
               defaultValue="string"
               style={{ width: 60 }}
               key={'select-'+index}
-              onChange={(e) => handleChange(index, 'type',e)}
+              onChange={(e) => handleChange(useJsonColumnsState,index, 'type',e)}
               options={[
                 { value: 'number', label: <FieldNumberOutlined />},
                 { value: 'string', label: <FieldStringOutlined /> },
@@ -190,7 +192,7 @@ function tableString2Array(string) {
           } 
           value={jsonColumns.name}
           defaultValue={'column-'+index}
-          onChange={(e) => handleChange(index, 'name',e.target.value)}
+          onChange={(e) => handleChange(useJsonColumnsState, index, 'name',e.target.value)}
           />
       )
     }
@@ -198,61 +200,77 @@ function tableString2Array(string) {
   return [columns, array]
 }
 
-function handleChange (index, type, value) {
-  if (!jsonColumns[index]) {
-    jsonColumns[index] = {}
+function handleChange (useJsonColumnsState, index, type, value) {
+  try {
+    const [jsonColumns, setJsonColumns] = useJsonColumnsState
+    if (!jsonColumns[index]) {
+      jsonColumns[index] = {}
+    }
+    jsonColumns[index][type] = value
+    setJsonColumns(jsonColumns)
+  } catch (error) {
+    message.error('编辑失败')
   }
-  jsonColumns[index][type] = value
 }
 
-function handleSave (data, messageApi) {
-  const textToCopy = JSON.stringify(data.map((item) => {
-    const obj = {}
-    jsonColumns.forEach((v, i) => {
-      if (v.type !== 'not') {
-        try {
-          obj[v.name] = v.type === 'number'?Number(item[i]):item[i]
-        } catch (error) {
-          if (v.type === 'number') {
-            message.error(`请检查${i}行是否为数字`);
+function handleSave (data, jsonColumns) {
+  try {
+    const textToCopy = JSON.stringify(data.map((item) => {
+      const obj = {}
+      jsonColumns.forEach((v, i) => {
+        if (v.type !== 'not') {
+          try {
+            obj[v.name] = v.type === 'number'?Number(item[i]):item[i]
+          } catch (error) {
+            if (v.type === 'number') {
+              message.error('请检查内容格式')
+            }
           }
         }
-      }
-    })
-    return obj
-  }));
-  downloadTextFile(textToCopy, Math.random() + '.json')
+      })
+      return obj
+    }));
+    downloadTextFile(textToCopy, Math.random() + '.json')
+    message.success('保存成功')
+  } catch (error) {
+    message.error('保存失败')
+  }
 }
 
-function handleSaveMenu (data,) {
-  const textToCopy = JSON.stringify(data.map((item) => {
-    const obj = {}
-    jsonColumns.forEach((v, i) => {
-      if (v.type !== 'not') {
-        try {
-          obj[v.name] = v.type === 'number'?Number(item[i]):item[i]
-        } catch (error) {
-          if (v.type === 'number') {
-            message.error(`请检查${i}行是否为数字`);
+function handleSaveMenu (data, jsonColumns) {
+  try {
+    const textToCopy = JSON.stringify(data.map((item) => {
+      const obj = {}
+      jsonColumns.forEach((v, i) => {
+        if (v.type !== 'not') {
+          try {
+            obj[v.name] = v.type === 'number'?Number(item[i]):item[i]
+          } catch (error) {
+            if (v.type === 'number') {
+              message.error('请检查内容格式');
+            }
           }
         }
-      }
+      })
+      return obj
+    }));
+    navigator.clipboard.writeText(textToCopy)
+    .then(() => {
+      message.success("复制成功");
     })
-    return obj
-  }));
-  navigator.clipboard.writeText(textToCopy)
-  .then(() => {
-    message.success("复制成功");
-  })
-  .catch((error) => {
-    message.error("复制失败");
-    console.error('复制文本到剪贴板失败:', error);
-  });
+    .catch((error) => {
+      message.error("复制失败");
+      console.error('复制文本到剪贴板失败:', error);
+    });
+  } catch (error) {
+    message.error("处理失败");
+  }
 }
 
-function reverseTable (useColumnsState, useDataState) {
-  const [columns, setColumns] = useColumnsState
+function reverseTable (useColumnsState, useDataState, useJsonColumnsState) {
+  const [, setColumns] = useColumnsState
   const [data, setData] = useDataState
+  const [jsonColumns] = useJsonColumnsState
   let newData = [];
 
   if (data.length === 0) {
